@@ -1,5 +1,9 @@
 # Builds the jar with the trade-screen fix for a private modpack. Not part of the fix itself (that is the branch
 # fix/trade-screen-missing-mob, offered upstream).
+#
+# The jar is never published. A workflow artifact can be downloaded by anyone signed in to GitHub, so the jar is
+# encrypted before it is uploaded, to the certificate in .github/private-jar-recipient.crt. Only the holder of its
+# private key can open it. The artifact holds the encrypted jar and its sha512 (of the jar, before encryption).
 name: dsw-build
 on:
   push:
@@ -12,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -20,8 +26,18 @@ jobs:
         with:
           gradle-version: '8.9'
       - run: gradle build --no-daemon
-      - run: sha512sum build/libs/*.jar
+      - name: Encrypt the jar
+        run: |
+          set -eu
+          mkdir out
+          for f in build/libs/*.jar; do
+            n=$(basename "$f")
+            (cd build/libs && sha512sum "$n") | tee "out/$n.sha512"
+            openssl cms -encrypt -binary -aes256 -outform DER -in "$f" -out "out/$n.cms" .github/private-jar-recipient.crt
+          done
+          ls -la out
       - uses: actions/upload-artifact@v4
         with:
-          name: mowziesmobs-jar
-          path: build/libs/*.jar
+          name: mowziesmobs-jar-encrypted
+          path: out/
+          retention-days: 14
